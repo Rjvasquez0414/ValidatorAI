@@ -1,6 +1,24 @@
 import { supabase } from '../lib/supabase'
 import type { User, UserRole } from '../types'
 
+// Helper para extraer mensaje de error de Supabase
+const getErrorMessage = (error: any): string => {
+  if (error?.message) {
+    // Traducir mensajes comunes de Supabase
+    if (error.message.includes('Invalid login credentials')) {
+      return 'Email o contraseña incorrectos'
+    }
+    if (error.message.includes('Email not confirmed')) {
+      return 'Por favor confirma tu email antes de iniciar sesión'
+    }
+    if (error.message.includes('User already registered')) {
+      return 'Este email ya está registrado'
+    }
+    return error.message
+  }
+  return 'Error de autenticación'
+}
+
 export const authService = {
   // Login con email/password
   async signInWithEmail(email: string, password: string) {
@@ -8,7 +26,10 @@ export const authService = {
       email,
       password
     })
-    if (error) throw error
+    if (error) {
+      console.error('Supabase auth error:', error)
+      throw new Error(getErrorMessage(error))
+    }
     return data
   },
 
@@ -24,7 +45,10 @@ export const authService = {
         }
       }
     })
-    if (error) throw error
+    if (error) {
+      console.error('Supabase signup error:', error)
+      throw new Error(getErrorMessage(error))
+    }
     return data
   },
 
