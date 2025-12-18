@@ -1,0 +1,5 @@
+{
+  "name": "MVP Validator & Scaler",
+  "description": "A business intelligence dashboard to track, measure, and validate MVP projects. Features AI-driven analysis to decide whether to Scale, Pivot, or Kill projects based on key performance metrics.",
+  "requestFramePermissions": []
+}
