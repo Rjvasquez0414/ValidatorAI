@@ -1,28 +1,30 @@
-import React, { useState } from 'react';
-import { Project, ProjectStatus, NewProjectData, MetricData, User, UserRole } from './types';
-import { MOCK_PROJECTS, MOCK_USERS } from './constants';
+import React, { useState, useEffect } from 'react';
+import { Project, ProjectStatus, NewProjectData, MetricData, UserRole } from './types';
 import { Dashboard } from './components/Dashboard';
 import { ProjectDetail } from './components/ProjectDetail';
 import { Login } from './components/Login';
 import { UserManagement } from './components/UserManagement';
 import { Settings } from './components/Settings';
-import { analyzeProject } from './services/geminiService';
-import { Layers, Command, X, Users as UsersIcon, LogOut, LayoutDashboard, Settings as SettingsIcon } from 'lucide-react';
+import { AuthProvider, useAuthContext } from './providers/AuthProvider';
+import { useProjects } from './hooks/useProjects';
+import { userService } from './services/userService';
+import { Layers, X, Users as UsersIcon, LogOut, LayoutDashboard, Settings as SettingsIcon, Loader2 } from 'lucide-react';
 
 type ViewMode = 'DASHBOARD' | 'TEAM' | 'SETTINGS';
 
-const App: React.FC = () => {
-  // Auth State
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+// Main App Content (inside AuthProvider)
+const AppContent: React.FC = () => {
+  const { user: currentUser, loading: authLoading, signOut } = useAuthContext();
+  const { projects, loading: projectsLoading, addProject, updateStatus, addMetric, analyzeAndSave, refresh } = useProjects();
 
-  // App State
-  const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
-  const [users, setUsers] = useState<User[]>(MOCK_USERS);
-  
+  // Users state
+  const [users, setUsers] = useState<any[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+
   // Navigation State
   const [currentView, setCurrentView] = useState<ViewMode>('DASHBOARD');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  
+
   // UI State
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
@@ -32,90 +34,114 @@ const App: React.FC = () => {
 
   const selectedProject = projects.find(p => p.id === selectedProjectId);
 
+  // Load users when authenticated
+  useEffect(() => {
+    if (currentUser) {
+      loadUsers();
+    }
+  }, [currentUser]);
+
+  const loadUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const data = await userService.getUsers();
+      setUsers(data);
+    } catch (err) {
+      console.error('Error loading users:', err);
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
   // --- Handlers ---
 
-  const handleLogin = (user: User) => {
-    setCurrentUser(user);
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      setCurrentView('DASHBOARD');
+      setSelectedProjectId(null);
+    } catch (err) {
+      console.error('Error logging out:', err);
+    }
   };
 
-  const handleLogout = () => {
-    setCurrentUser(null);
-    setCurrentView('DASHBOARD');
-    setSelectedProjectId(null);
+  const handleInviteUser = async (email: string, role: UserRole) => {
+    if (!currentUser) return;
+    try {
+      await userService.inviteUser(email, role, currentUser.id);
+      // Reload users to show the pending invitation
+      await loadUsers();
+    } catch (err) {
+      console.error('Error inviting user:', err);
+    }
   };
 
-  const handleInviteUser = (email: string, role: UserRole) => {
-    const newUser: User = {
-        id: Date.now().toString(),
-        name: email.split('@')[0], // Simple name extraction
-        email,
-        role,
-        status: 'Pending',
-        avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
-    };
-    setUsers([...users, newUser]);
-  };
-
-  const handleAddProject = (e: React.FormEvent) => {
+  const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    const project: Project = {
-      id: Date.now().toString(),
-      ...newProject,
-      startDate: new Date().toISOString().split('T')[0],
-      status: ProjectStatus.ACTIVE,
-      metrics: []
-    };
-    setProjects([...projects, project]);
-    setShowNewProjectModal(false);
-    setNewProject({ name: '', description: '', category: '' });
+    if (!currentUser) return;
+
+    try {
+      await addProject(newProject, currentUser.id);
+      setShowNewProjectModal(false);
+      setNewProject({ name: '', description: '', category: '' });
+    } catch (err) {
+      console.error('Error creating project:', err);
+    }
   };
 
-  const handleAddMetric = (projectId: string, metric: MetricData) => {
-    if (currentUser?.role === UserRole.VIEWER) return; // Permission check
-    setProjects(prev => prev.map(p => {
-        if (p.id === projectId) {
-            return { ...p, metrics: [...p.metrics, metric] };
-        }
-        return p;
-    }));
+  const handleAddMetric = async (projectId: string, metric: MetricData) => {
+    if (currentUser?.role === UserRole.VIEWER) return;
+    try {
+      await addMetric(projectId, metric);
+    } catch (err) {
+      console.error('Error adding metric:', err);
+    }
   };
 
-  const handleChangeStatus = (projectId: string, status: ProjectStatus) => {
-    if (currentUser?.role !== UserRole.ADMIN) return; // Permission check
-    setProjects(prev => prev.map(p => {
-        if (p.id === projectId) return { ...p, status };
-        return p;
-    }));
+  const handleChangeStatus = async (projectId: string, status: ProjectStatus) => {
+    if (currentUser?.role !== UserRole.ADMIN) return;
+    try {
+      await updateStatus(projectId, status);
+    } catch (err) {
+      console.error('Error updating status:', err);
+    }
   };
 
   const handleAnalyze = async (project: Project) => {
     setAnalyzingId(project.id);
-    const analysis = await analyzeProject(project);
-    setProjects(prev => prev.map(p => {
-        if (p.id === project.id) return { ...p, lastAnalysis: analysis };
-        return p;
-    }));
-    setAnalyzingId(null);
+    try {
+      await analyzeAndSave(project);
+    } catch (err) {
+      console.error('Error analyzing project:', err);
+    } finally {
+      setAnalyzingId(null);
+    }
   };
 
-  const handleImportProjects = (importedProjects: Project[]) => {
-      // Merge strategy: replace if ID exists, append if new
-      // In a real app, you might want more complex merge logic
-      const projectMap = new Map(projects.map(p => [p.id, p]));
-      
-      importedProjects.forEach(p => {
-          projectMap.set(p.id, p);
-      });
-      
-      setProjects(Array.from(projectMap.values()));
+  const handleImportProjects = async (importedProjects: Project[]) => {
+    // For now, just refresh from the database
+    // In a real implementation, you would upload the imported projects
+    await refresh();
   };
 
-  // --- Render ---
-
-  if (!currentUser) {
-    return <Login onLogin={handleLogin} />;
+  // --- Loading State ---
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-brand-600 mx-auto mb-4" />
+          <p className="text-gray-600 font-medium">Loading...</p>
+        </div>
+      </div>
+    );
   }
 
+  // --- Auth Check ---
+  if (!currentUser) {
+    return <Login />;
+  }
+
+  // --- Main Render ---
   return (
     <div className="min-h-screen pb-20 relative">
         {/* Navigation - Glass Effect */}
@@ -128,23 +154,23 @@ const App: React.FC = () => {
                     </div>
                     <span className="font-bold text-2xl tracking-tight text-gray-800">Validator<span className="text-brand-600">.ai</span></span>
                 </div>
-                
+
                 <div className="flex items-center gap-6">
                     {/* Menu Links */}
                     <div className="hidden md:flex items-center gap-1 bg-white/40 p-1 rounded-full border border-white/50">
-                        <button 
+                        <button
                             onClick={() => { setCurrentView('DASHBOARD'); setSelectedProjectId(null); }}
                             className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-all ${currentView === 'DASHBOARD' && !selectedProjectId ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
                         >
                             <LayoutDashboard size={16} /> Dashboard
                         </button>
-                        <button 
+                        <button
                             onClick={() => { setCurrentView('TEAM'); setSelectedProjectId(null); }}
                             className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-all ${currentView === 'TEAM' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
                         >
                             <UsersIcon size={16} /> Team
                         </button>
-                        <button 
+                        <button
                             onClick={() => { setCurrentView('SETTINGS'); setSelectedProjectId(null); }}
                             className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 transition-all ${currentView === 'SETTINGS' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}
                         >
@@ -159,12 +185,12 @@ const App: React.FC = () => {
                             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wide mt-1">{currentUser.role}</p>
                         </div>
                         <div className="relative group cursor-pointer">
-                            <img 
-                                src={currentUser.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.email}`} 
-                                alt={currentUser.name} 
-                                className="w-10 h-10 rounded-full border-2 border-white shadow-sm" 
+                            <img
+                                src={currentUser.avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.email}`}
+                                alt={currentUser.name}
+                                className="w-10 h-10 rounded-full border-2 border-white shadow-sm"
                             />
-                            <button 
+                            <button
                                 onClick={handleLogout}
                                 className="absolute -bottom-1 -right-1 bg-gray-900 text-white w-5 h-5 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
                                 title="Logout"
@@ -179,27 +205,31 @@ const App: React.FC = () => {
 
         {/* Main Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 relative z-10">
-            {selectedProjectId ? (
-                <ProjectDetail 
-                    project={selectedProject!} 
+            {projectsLoading && !projects.length ? (
+                <div className="flex items-center justify-center py-20">
+                    <Loader2 className="w-8 h-8 animate-spin text-brand-600" />
+                </div>
+            ) : selectedProjectId ? (
+                <ProjectDetail
+                    project={selectedProject!}
                     onBack={() => setSelectedProjectId(null)}
                     onAddMetric={handleAddMetric}
                     onChangeStatus={handleChangeStatus}
                 />
             ) : currentView === 'TEAM' ? (
-                <UserManagement 
-                    users={users} 
+                <UserManagement
+                    users={users}
                     currentUser={currentUser}
                     onInviteUser={handleInviteUser}
                 />
             ) : currentView === 'SETTINGS' ? (
-                <Settings 
+                <Settings
                     projects={projects}
                     onImport={handleImportProjects}
                 />
             ) : (
-                <Dashboard 
-                    projects={projects} 
+                <Dashboard
+                    projects={projects}
                     onSelectProject={(p) => setSelectedProjectId(p.id)}
                     onAddProject={() => setShowNewProjectModal(true)}
                     onAnalyzeProject={handleAnalyze}
@@ -213,21 +243,21 @@ const App: React.FC = () => {
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                 <div className="absolute inset-0 bg-gray-900/20 backdrop-blur-sm" onClick={() => setShowNewProjectModal(false)}></div>
                 <div className="relative bg-white/80 backdrop-blur-2xl rounded-[2rem] p-8 w-full max-w-lg shadow-[0_8px_32px_0_rgba(31,38,135,0.2)] border border-white/60 ring-1 ring-white/50 animate-fade-in-up">
-                    <button 
+                    <button
                         onClick={() => setShowNewProjectModal(false)}
                         className="absolute top-6 right-6 p-2 rounded-full hover:bg-black/5 transition-colors text-gray-500"
                     >
                         <X size={20} />
                     </button>
-                    
+
                     <h2 className="text-3xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-gray-900 to-gray-600">Launch New MVP</h2>
                     <p className="text-gray-500 mb-8 font-medium">Define the hypothesis you want to validate.</p>
-                    
+
                     <form onSubmit={handleAddProject} className="space-y-6">
                         <div className="space-y-2">
                             <label className="block text-sm font-bold text-gray-700 ml-1">Project Name</label>
-                            <input 
-                                required 
+                            <input
+                                required
                                 className="w-full bg-white/50 border border-white/50 focus:border-brand-500/50 rounded-2xl px-5 py-3 focus:ring-4 focus:ring-brand-500/10 focus:outline-none transition-all shadow-inner font-medium"
                                 placeholder="e.g. Uber for Dog Walkers"
                                 value={newProject.name}
@@ -237,7 +267,7 @@ const App: React.FC = () => {
                         <div className="space-y-2">
                             <label className="block text-sm font-bold text-gray-700 ml-1">Category</label>
                             <div className="relative">
-                                <select 
+                                <select
                                     className="w-full bg-white/50 border border-white/50 focus:border-brand-500/50 rounded-2xl px-5 py-3 focus:ring-4 focus:ring-brand-500/10 focus:outline-none transition-all shadow-inner font-medium appearance-none"
                                     value={newProject.category}
                                     onChange={e => setNewProject({...newProject, category: e.target.value})}
@@ -258,8 +288,8 @@ const App: React.FC = () => {
                         </div>
                         <div className="space-y-2">
                             <label className="block text-sm font-bold text-gray-700 ml-1">Value Proposition (Description)</label>
-                            <textarea 
-                                required 
+                            <textarea
+                                required
                                 className="w-full bg-white/50 border border-white/50 focus:border-brand-500/50 rounded-2xl px-5 py-3 h-32 focus:ring-4 focus:ring-brand-500/10 focus:outline-none resize-none transition-all shadow-inner font-medium"
                                 placeholder="What problem are you solving? How does it work?"
                                 value={newProject.description}
@@ -267,15 +297,15 @@ const App: React.FC = () => {
                             />
                         </div>
                         <div className="flex gap-4 pt-4">
-                            <button 
-                                type="button" 
+                            <button
+                                type="button"
                                 onClick={() => setShowNewProjectModal(false)}
                                 className="flex-1 py-3.5 text-gray-600 font-bold hover:bg-white/50 rounded-2xl transition-colors"
                             >
                                 Cancel
                             </button>
-                            <button 
-                                type="submit" 
+                            <button
+                                type="submit"
                                 className="flex-1 py-3.5 bg-gradient-to-r from-gray-900 to-gray-800 hover:from-black hover:to-gray-900 text-white font-bold rounded-2xl shadow-lg shadow-gray-900/20 transform transition-all active:scale-[0.98]"
                             >
                                 Create Project
@@ -286,6 +316,15 @@ const App: React.FC = () => {
             </div>
         )}
     </div>
+  );
+};
+
+// App wrapper with AuthProvider
+const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 };
 

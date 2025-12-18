@@ -1,11 +1,6 @@
 import React, { useState } from 'react';
-import { Layers, ArrowRight, Lock, Mail } from 'lucide-react';
-import { User, UserRole } from '../types';
-import { MOCK_USERS } from '../constants';
-
-interface LoginProps {
-  onLogin: (user: User) => void;
-}
+import { Layers, ArrowRight, Lock, Mail, UserPlus } from 'lucide-react';
+import { useAuthContext } from '../providers/AuthProvider';
 
 const GoogleIcon = () => (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -16,63 +11,50 @@ const GoogleIcon = () => (
     </svg>
 );
 
-export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+export const Login: React.FC = () => {
+  const { signIn, signUp, signInWithGoogle } = useAuthContext();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
-    // Mock authentication simulation
-    setTimeout(() => {
-        // Simple mock check - in reality, use backend
-        const user = MOCK_USERS.find(u => u.email.toLowerCase() === email.toLowerCase());
-        
-        // Backdoor for demo: if email is valid formatted but not in mock, login as admin
-        if (user) {
-            onLogin(user);
-        } else if (email.includes('@')) {
-             // Create temp session user
-             onLogin({
-                id: 'temp',
-                name: 'Demo User',
-                email: email,
-                role: UserRole.ADMIN,
-                status: 'Active',
-                avatarUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
-             });
-        } else {
-            setError('Invalid credentials. Try admin@validator.ai');
-            setIsLoading(false);
-        }
-    }, 1000);
+    try {
+      if (isSignUp) {
+        await signUp(email, password, name);
+      } else {
+        await signIn(email, password);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Authentication failed';
+      setError(message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleGoogleLogin = () => {
-      setError('');
-      setIsLoading(true);
-      
-      // Mock Google Auth delay
-      setTimeout(() => {
-          onLogin({
-            id: 'google-user',
-            name: 'Alex from Google',
-            email: 'alex.founder@gmail.com',
-            role: UserRole.ANALYST,
-            status: 'Active',
-            avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=AlexGoogle'
-          });
-      }, 1500);
+  const handleGoogleLogin = async () => {
+    setError('');
+    setIsLoading(true);
+
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Google authentication failed';
+      setError(message);
+      setIsLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center relative p-4">
-       {/* Background is handled by global CSS in index.html, but we add an overlay */}
-       
        <div className="w-full max-w-md">
             {/* Logo Section */}
             <div className="flex justify-center mb-8">
@@ -80,26 +62,48 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     <Layers size={32} />
                 </div>
             </div>
-            
+
             <div className="bg-white/40 backdrop-blur-2xl border border-white/60 rounded-[2.5rem] shadow-glass p-8 md:p-10 relative overflow-hidden animate-fade-in-up">
                 {/* Decorative mesh inside card */}
                 <div className="absolute top-[-20%] left-[-20%] w-[50%] h-[50%] bg-purple-300/30 blur-[60px] rounded-full pointer-events-none"></div>
-                
+
                 <div className="relative z-10">
                     <div className="text-center mb-8">
-                        <h2 className="text-3xl font-bold text-gray-900 mb-2">Welcome Back</h2>
-                        <p className="text-gray-500 font-medium">Sign in to manage your MVPs</p>
+                        <h2 className="text-3xl font-bold text-gray-900 mb-2">
+                          {isSignUp ? 'Create Account' : 'Welcome Back'}
+                        </h2>
+                        <p className="text-gray-500 font-medium">
+                          {isSignUp ? 'Start validating your MVPs' : 'Sign in to manage your MVPs'}
+                        </p>
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-5">
+                        {isSignUp && (
+                          <div className="space-y-2">
+                              <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Name</label>
+                              <div className="relative">
+                                  <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
+                                      <UserPlus size={18} />
+                                  </div>
+                                  <input
+                                      type="text"
+                                      value={name}
+                                      onChange={(e) => setName(e.target.value)}
+                                      className="w-full bg-white/50 border border-white/50 rounded-xl pl-12 pr-4 py-3.5 focus:ring-4 focus:ring-brand-500/10 focus:outline-none focus:border-brand-500/50 transition-all font-medium shadow-inner placeholder:text-gray-400"
+                                      placeholder="Your name"
+                                  />
+                              </div>
+                          </div>
+                        )}
+
                         <div className="space-y-2">
                             <label className="text-xs font-bold text-gray-500 uppercase tracking-wider ml-1">Email</label>
                             <div className="relative">
                                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
                                     <Mail size={18} />
                                 </div>
-                                <input 
-                                    type="email" 
+                                <input
+                                    type="email"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
                                     className="w-full bg-white/50 border border-white/50 rounded-xl pl-12 pr-4 py-3.5 focus:ring-4 focus:ring-brand-500/10 focus:outline-none focus:border-brand-500/50 transition-all font-medium shadow-inner placeholder:text-gray-400"
@@ -115,15 +119,19 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                                 <div className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">
                                     <Lock size={18} />
                                 </div>
-                                <input 
-                                    type="password" 
+                                <input
+                                    type="password"
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
                                     className="w-full bg-white/50 border border-white/50 rounded-xl pl-12 pr-4 py-3.5 focus:ring-4 focus:ring-brand-500/10 focus:outline-none focus:border-brand-500/50 transition-all font-medium shadow-inner placeholder:text-gray-400"
                                     placeholder="••••••••"
                                     required
+                                    minLength={6}
                                 />
                             </div>
+                            {isSignUp && (
+                              <p className="text-xs text-gray-400 ml-1">Minimum 6 characters</p>
+                            )}
                         </div>
 
                         {error && (
@@ -132,14 +140,14 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                             </div>
                         )}
 
-                        <button 
-                            type="submit" 
+                        <button
+                            type="submit"
                             disabled={isLoading}
                             className="w-full bg-gray-900 hover:bg-black text-white py-4 rounded-2xl font-bold shadow-xl shadow-gray-900/20 flex items-center justify-center gap-2 transition-all transform hover:-translate-y-1 active:scale-[0.98] disabled:opacity-70 disabled:cursor-not-allowed mt-4"
                         >
-                            {isLoading ? 'Signing In...' : (
+                            {isLoading ? (isSignUp ? 'Creating Account...' : 'Signing In...') : (
                                 <>
-                                    Sign In <ArrowRight size={18} />
+                                    {isSignUp ? 'Create Account' : 'Sign In'} <ArrowRight size={18} />
                                 </>
                             )}
                         </button>
@@ -151,7 +159,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                         <div className="h-px bg-gray-300/50 flex-1"></div>
                     </div>
 
-                    <button 
+                    <button
                         type="button"
                         onClick={handleGoogleLogin}
                         disabled={isLoading}
@@ -163,7 +171,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
                     <div className="mt-8 text-center">
                         <p className="text-sm text-gray-500">
-                            Don't have an account? <span className="text-brand-600 font-bold cursor-pointer hover:underline">Contact Admin</span>
+                            {isSignUp ? (
+                              <>Already have an account? <button type="button" onClick={() => setIsSignUp(false)} className="text-brand-600 font-bold cursor-pointer hover:underline">Sign In</button></>
+                            ) : (
+                              <>Don't have an account? <button type="button" onClick={() => setIsSignUp(true)} className="text-brand-600 font-bold cursor-pointer hover:underline">Sign Up</button></>
+                            )}
                         </p>
                     </div>
                 </div>
